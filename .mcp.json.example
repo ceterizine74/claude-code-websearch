@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "websearch": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "__PROJECT_DIR__",
+        "python",
+        "-m",
+        "websearch_mcp.server"
+      ]
+    }
+  }
+}

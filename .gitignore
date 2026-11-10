@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Виртуальное окружение uv
+.venv/
+venv/
+env/
+
+# Тесты и кэш инструментов
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ОС / редакторы
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Локальный конфиг MCP с абсолютным путём к проекту — у каждого свой.
+# В репозитории лежит .mcp.json.example как шаблон.
+.mcp.json
