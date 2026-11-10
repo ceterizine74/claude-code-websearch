@@ -218,12 +218,17 @@ class EngineChain:
                     self._store(cache_key, chain)
                     return chain
 
-                assert result.block is not None
-                failures.append((engine, result.block))
+                # result.block всегда заполнен при result.ok == False, но
+                # полагаемся на явную ветку, а не на assert: под python -O
+                # assert вырезается, и в failures попал бы None.
+                block = result.block or Block(BlockReason.NETWORK, "причина неизвестна")
+                failures.append((engine, block))
 
                 # Пауза тоже укладывается в бюджет: спать дольше смысла нет,
                 # запрос после этого всё равно не успеет уйти.
-                pause = min(backoff + random.uniform(0, 0.4), _MAX_BACKOFF)
+                # Джиттер нужен только чтобы не синхронизировать повторы;
+                # криптостойкость здесь ни при чём, поэтому random достаточно.
+                pause = min(backoff + random.uniform(0, 0.4), _MAX_BACKOFF)  # nosec B311
                 if not self._backoff_sleep(pause, deadline):
                     out_of_time = True
                     break
@@ -308,11 +313,6 @@ class EngineChain:
 
         return EngineAttempt(engine, False, 0,
                              Block(BlockReason.NETWORK, "исчерпаны попытки"))
-
-    @staticmethod
-    def _out_of_budget(deadline: float | None) -> bool:
-        """Повторять запрос бессмысленно, если бюджет уже исчерпан."""
-        return deadline is not None and time.monotonic() >= deadline
 
     def _backoff_sleep(self, pause: float, deadline: float | None) -> bool:
         """Поспать перед повтором, не выходя за общий бюджет поиска.

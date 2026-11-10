@@ -22,6 +22,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 from .cache import Cache, TTL_PAGE, TTL_SEARCH
 from .engines import DEFAULT_ENGINE_ORDER, EngineChain, ENGINE_REGISTRY
 from .fetch import parse_page
+from .netguard import BlockedAddressError, validate_url
 
 mcp = MCPServer(
     "websearch",
@@ -85,7 +86,13 @@ def _get_html(url: str) -> tuple[str, str]:
 
     Ошибка при переполнении — ``PageTooLargeError``; вызывающий решает,
     считать ли это фатальным или просто пропустить страницу.
+
+    Здесь же проверяется адрес: ``_get_html`` — единственная точка, через
+    которую уходит любая загрузка, поэтому SSRF-защита нужна именно тут,
+    а не в каждом инструменте по отдельности.
     """
+    validate_url(url)
+
     with _client.stream("GET", url) as resp:
         resp.raise_for_status()
         ctype = resp.headers.get("content-type", "")
@@ -119,6 +126,16 @@ def _get_html(url: str) -> tuple[str, str]:
 
 class PageTooLargeError(RuntimeError):
     """Страница превысила лимит загрузки и была отброшена."""
+
+
+class FetchError(RuntimeError):
+    """Страницу не удалось скачать (сеть, HTTP-статус, запрещённый адрес).
+
+    Свой тип, а не пересоздание класса из ``httpx``: у ``HTTPStatusError``
+    обязательные keyword-аргументы ``request``/``response``, поэтому
+    ``type(exc)(сообщение)`` падал с ``TypeError`` на любом 4xx/5xx и клиент
+    видел поломку вместо внятной причины.
+    """
 
 
 def _fmt_results(query: str, results, engine: str, from_cache: bool,
@@ -225,13 +242,16 @@ def fetch_page(url: str) -> str:
     """
     if not url.startswith(("http://", "https://")):
         raise ValueError("url должен начинаться с http:// или https://")
+    # Явная проверка на входе: клиент должен получить причину сразу, а не
+    # общий отказ из глубины загрузки. Повторно адрес проверяется в _get_html.
+    validate_url(url)
 
     try:
         return _load_markdown(url)
     except httpx.HTTPError as exc:
         # Сетевая ошибка остаётся исключением — клиент должен её увидеть,
         # а не принять за содержимое страницы.
-        raise type(exc)(f"не удалось скачать {url}: {exc}") from exc
+        raise FetchError(f"не удалось скачать {url}: {exc}") from exc
 
 
 @mcp.tool()
@@ -249,6 +269,11 @@ def crawl_docs(start_url: str, depth: int = 1, max_pages: int = 15) -> str:
     """
     if not start_url.startswith(("http://", "https://")):
         raise ValueError("start_url должен начинаться с http:// или https://")
+    # Стартовый адрес проверяем явно: иначе обход молча соберёт ноль страниц
+    # и вернёт «не удалось скачать ни одной», скрыв настоящую причину.
+    # Ссылки, найденные внутри, пропускаются через _get_html (там тоже guard),
+    # и недоступные просто отбрасываются.
+    validate_url(start_url)
     depth = max(0, min(int(depth), 3))
     max_pages = max(1, min(int(max_pages), 50))
 
@@ -266,7 +291,10 @@ def crawl_docs(start_url: str, depth: int = 1, max_pages: int = 15) -> str:
         if md is None:
             try:
                 html, ctype = _get_html(url)
-            except (httpx.HTTPError, PageTooLargeError):
+            except (httpx.HTTPError, PageTooLargeError, BlockedAddressError):
+                # Ссылку на недоступный/запрещённый адрес пропускаем: одна
+                # внутренняя ссылка со страницы документации не должна
+                # ронять весь обход.
                 continue
             if ctype and "html" not in ctype and "xml" not in ctype:
                 continue

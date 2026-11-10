@@ -4,6 +4,26 @@ version = "0.1.0"
 description = "Локальный MCP-сервер веб-поиска: ротация бесплатных движков, чтение страниц в markdown, обход документации."
 readme = "README.md"
 requires-python = ">=3.12"
+# НЕ open source в смысле OSI: использование разрешено только в некоммерческих
+# целях, распространение и форки обязаны сохранять атрибуцию и текст лицензии.
+# PEP 639 требует валидное SPDX-выражение, поэтому идентификатор, а не название.
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "ceterizine74" },
+]
+keywords = ["mcp", "search", "web-search", "claude", "model-context-protocol"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+    "Typing :: Typed",
+]
 dependencies = [
     "mcp[cli]>=1.2.0",
     "httpx>=0.27",
