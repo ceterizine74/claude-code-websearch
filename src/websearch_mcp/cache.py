@@ -32,21 +32,42 @@ _PRUNE_EVERY = 32
 _MAX_TTL = max(TTL_SEARCH, TTL_PAGE)
 
 
+def _home() -> Path:
+    """Path.home() с проверкой: возвращает только абсолютный путь.
+
+    Path.home() может бросить RuntimeError (Linux/macOS без HOME) или вернуть
+    относительный '.' (Windows с пустыми переменными окружения). Оба случая
+    приводят к тому, что кэш создастся в непредсказуемом CWD клиента.
+    """
+    home = Path.home()
+    if not home.is_absolute():
+        raise RuntimeError(
+            "Home directory resolved to a relative path. "
+            "Set HOME (Linux/macOS) or USERPROFILE (Windows) environment variable."
+        )
+    return home
+
+
 def default_cache_dir() -> Path:
-    """Каталог кэша по соглашениям текущей ОС."""
+    """Каталог кэша по соглашениям текущей ОС.
+
+    Всегда возвращает абсолютный путь. Если home-каталог недоступен,
+    бросает RuntimeError с понятным сообщением — лучше явно сломаться,
+    чем писать в случайное место.
+    """
     if sys.platform == "win32":
         base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
-        if base:
+        if base and Path(base).is_absolute():
             return Path(base) / "websearch-mcp" / "cache"
-        return Path.home() / "AppData" / "Local" / "websearch-mcp" / "cache"
+        return _home() / "AppData" / "Local" / "websearch-mcp" / "cache"
 
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Caches" / "websearch-mcp"
+        return _home() / "Library" / "Caches" / "websearch-mcp"
 
     base = os.environ.get("XDG_CACHE_HOME")
-    if base:
+    if base and Path(base).is_absolute():
         return Path(base) / "websearch-mcp"
-    return Path.home() / ".cache" / "websearch-mcp"
+    return _home() / ".cache" / "websearch-mcp"
 
 
 class Cache:

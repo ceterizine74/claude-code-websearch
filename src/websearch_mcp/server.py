@@ -45,7 +45,28 @@ _READ_CHUNK = 64 * 1024
 # что не влезает ни в одно окно.
 _MAX_TOTAL_MD_CHARS = 300_000
 
-_cache = Cache()
+# Кэш создаётся при первом обращении, а не при импорте модуля. Если home
+# недоступен (контейнер, CI без HOME) или каталог не создаётся, сервер обязан
+# остаться рабочим: поиск и чтение страниц от кэша не зависят.
+# Это та же инварианта, что в cache.py — «кэш не должен уметь ломать сервер».
+_cache: Cache | None = None
+_cache_error: str | None = None
+
+
+def _get_cache() -> Cache | None:
+    """Кэш или None, если его не удалось создать. Причина сохраняется."""
+    global _cache, _cache_error
+    if _cache is not None:
+        return _cache
+    if _cache_error is not None:
+        return None
+    try:
+        _cache = Cache()
+    except (OSError, RuntimeError) as exc:
+        _cache_error = f"{type(exc).__name__}: {exc}"
+    return _cache
+
+
 _client = httpx.Client(
     timeout=httpx.Timeout(25.0, connect=10.0),
     follow_redirects=True,
@@ -56,7 +77,7 @@ _client = httpx.Client(
 def _chain() -> EngineChain:
     """Цепочка с общим клиентом (cookie-банка) и кэшем поиска."""
     return EngineChain(client=_client, engines=DEFAULT_ENGINE_ORDER,
-                       cache=_cache, ttl=TTL_SEARCH)
+                       cache=_get_cache(), ttl=TTL_SEARCH)
 
 
 def _get_html(url: str) -> tuple[str, str]:
@@ -144,7 +165,10 @@ def _page_cache_get(url: str) -> tuple[str | None, list[str]]:
     дальше неё. Записи старого формата (просто строка) считаются промахом и
     перекачиваются один раз — молча и без ошибок.
     """
-    hit = _cache.get(f"page:{url}", TTL_PAGE)
+    cache = _get_cache()
+    if cache is None:
+        return None, []
+    hit = cache.get(f"page:{url}", TTL_PAGE)
     if isinstance(hit, dict) and isinstance(hit.get("md"), str):
         links = hit.get("links")
         return hit["md"], links if isinstance(links, list) else []
@@ -152,8 +176,11 @@ def _page_cache_get(url: str) -> tuple[str | None, list[str]]:
 
 
 def _page_cache_set(url: str, md: str, links: list[str]) -> None:
+    cache = _get_cache()
+    if cache is None:
+        return
     try:
-        _cache.set(f"page:{url}", {"md": md, "links": links})
+        cache.set(f"page:{url}", {"md": md, "links": links})
     except OSError:
         pass   # кэш не должен ломать чтение страницы
 
@@ -308,7 +335,11 @@ def search_and_read(query: str, max_pages: int = 3) -> str:
 @mcp.tool()
 def cache_stats() -> str:
     """Статистика дискового кэша (число записей, размер, путь)."""
-    s = _cache.stats()
+    cache = _get_cache()
+    if cache is None:
+        return (f"Кэш недоступен: {_cache_error}\n"
+                "Поиск и чтение страниц работают, но результаты не сохраняются.")
+    s = cache.stats()
     return (f"Записей: {s['entries']}\n"
             f"Размер: {s['bytes'] / 1024:.1f} KiB\n"
             f"Путь: {s['path']}")
@@ -317,8 +348,10 @@ def cache_stats() -> str:
 @mcp.tool()
 def cache_clear() -> str:
     """Очистить дисковый кэш поиска и страниц."""
-    n = _cache.clear()
-    return f"Удалено записей: {n}"
+    cache = _get_cache()
+    if cache is None:
+        return f"Кэш недоступен: {_cache_error}"
+    return f"Удалено записей: {cache.clear()}"
 
 
 def main() -> None:

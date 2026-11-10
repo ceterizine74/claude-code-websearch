@@ -15,11 +15,33 @@ import sys
 
 import click
 
+
+def _force_utf8_stdio() -> None:
+    """Переключить stdout/stderr в UTF-8, если консоль открыта в другой кодировке.
+
+    Нужно для Windows: там консоль по умолчанию cp866/cp1251, и click падает с
+    UnicodeEncodeError на символах вроде «→» из текста справки — это происходит
+    до вызова _echo, поэтому перехват исключения не помогает.
+
+    На macOS и Linux UTF-8 обычно уже активен, и reconfigure ничего не меняет.
+    Если перекодировать нельзя (поток перенаправлён или не поддерживает),
+    молча оставляем как есть — _echo ниже подстрахует.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream.encoding and stream.encoding.lower() not in ("utf-8", "utf8"):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
+_force_utf8_stdio()
+
 # httpx логирует каждый запрос на INFO и перебивает наш вывод
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-from .cache import Cache, TTL_PAGE
+from .cache import TTL_PAGE
 from .engines import AllEnginesBlockedError, DEFAULT_ENGINE_ORDER, EngineChain
 from .server import cache_clear, cache_stats, crawl_docs, fetch_page, search_and_read, web_search
 
@@ -27,9 +49,8 @@ from .server import cache_clear, cache_stats, crawl_docs, fetch_page, search_and
 def _echo(text: str) -> None:
     """Печатать в stdout, переживая консоль с не-UTF-8 кодировкой.
 
-    На macOS и Linux UTF-8 работает из коробки, а старая Windows-консоль
-    (cp866/cp1251) может не суметь напечатать часть символов — тогда пишем
-    байты с заменой неподдерживаемых.
+    Основная защита — _force_utf8_stdio() при старте; это второй уровень на
+    случай, если перекодировать поток не удалось.
     """
     try:
         click.echo(text)
@@ -139,9 +160,15 @@ def cache_clear_cmd() -> None:
 def cache_prune_cmd() -> None:
     """Удалить только протухшие записи (свежие оставить)."""
     # Сервер чистит кэш сам раз в 32 записи; команда нужна, чтобы убрать
-    # накопившееся, не запуская сервер.
-    n = Cache().prune(TTL_PAGE)
-    _echo(f"Удалено протухших записей: {n}")
+    # накопившееся, не запуская сервер. Кэш берём через серверный геттер,
+    # чтобы при недоступном home сообщить то же, что и cache stats.
+    from . import server as srv
+
+    cache = srv._get_cache()
+    if cache is None:
+        _echo(f"Кэш недоступен: {srv._cache_error}")
+        raise SystemExit(1)
+    _echo(f"Удалено протухших записей: {cache.prune(TTL_PAGE)}")
 
 
 if __name__ == "__main__":

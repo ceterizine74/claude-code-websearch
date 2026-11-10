@@ -12,9 +12,9 @@ from websearch_mcp.cache import Cache
 def reset_cache(tmp_path, monkeypatch):
     """Изолированный кэш в tmp_path, чтобы тесты не трогали пользовательский.
 
-    Заменяет кэш сервера на пустой и возвращает его прежним после теста.
+    Кэш в сервере создаётся лениво, поэтому подменяется именно привязанное
+    состояние: сам объект, признак ошибки и счётчик чистки.
     """
-    original = server._cache
     monkeypatch.setattr(server, "_cache", Cache(tmp_path))
-    yield server._cache
-    monkeypatch.setattr(server, "_cache", original)
+    monkeypatch.setattr(server, "_cache_error", None)
+    return server._cache
